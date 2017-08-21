@@ -33,6 +33,28 @@ public static class StringOps
     {
         return (new Regex(regExp).IsMatch(target));
     }
+    
+    public static IEnumerable<string> SplitByPos(this string source, IEnumerable<int> positions)
+    {
+        int fromPos = 0;
+
+        foreach(int lastPos in positions)
+        {
+            yield return source.Substring(fromPos, lastPos - fromPos); 
+            fromPos = lastPos;
+        }
+    }
+    
+    public static IEnumerable<string> SplitByChunk(this string source, IEnumerable<int> chunks)
+    {
+        int fromPos = 0;
+
+        foreach(int chunksize in chunks)
+        {
+            yield return source.Substring(fromPos, chunksize); 
+            fromPos += chunksize;
+        }
+    }
 }
 
 #endregion StringExtensions
@@ -57,6 +79,7 @@ public static class FileOps
         }
     }
     
+    
    
     /// Helper function to read all lines in a textfile and return an IEnumerable of tuples containing line number and line text
     public static IEnumerable<Tuple<int, string>> ReadText2(string file)
@@ -76,9 +99,21 @@ public static class FileOps
     }
     
     /// Helper function to read char-delimited text files and return as IEnumerable of string arrays
-    public static IEnumerable<string[]> ReadCsv(string file, char delimiter)
+    public static IEnumerable<IEnumerable<string>> ReadCsv(string file, char delimiter)
     {
         return ReadText(file).Select(x => x.Split(delimiter));
+    }
+    
+    public static IEnumerable<IEnumerable<string>> ReadFlat(string file, IEnumerable<int> posOrChunks, PosOrChunk splitType)
+    {
+        if (splitType == PosOrChunk.ByPos)
+        {
+            return ReadText(file).Select(x => x.SplitByPos(posOrChunks));
+        }
+        else
+        {
+            return ReadText(file).Select(x => x.SplitByChunk(posOrChunks));
+        }
     }
     
     #endregion TextReader
@@ -155,7 +190,7 @@ public static class FileOps
     
     
     /// Searches and replaces trings within a specified text file; commits changes if updateFile is true. Returns a set of changed rows before and after replacement.
-    public static IEnumerable<SearchReplaceResult> SearchReplace(string filePath, string searchFor, string replaceWith, bool updateFile, bool createBackup)
+    public static IEnumerable<SearchReplaceResult> SearchReplace(string filePath, string searchFor, string replaceWith, bool updateFile, bool createBackup, bool deleteFoundRow)
     {
         var tempFile = Path.GetTempFileName();
         var encoding = Encoding.GetEncoding(1252); // defaulting to win 1252 encoding if not identified as UTF-8 or Unicode
@@ -172,7 +207,16 @@ public static class FileOps
         {
             foreach (var line in FileOps.ReadText2(filePath))
             {
-                var changedLine = line.Item2.Replace(searchFor, replaceWith);
+                var changedLine = String.Empty;
+                
+                if (deleteFoundRow)
+                {
+                    if (line.Item2.IndexOf(searchFor) == -1)
+                        changedLine = line.Item2;
+                }
+                else
+                    changedLine = line.Item2.Replace(searchFor, replaceWith);
+                
                 if (updateFile)
                     writer.WriteLine(changedLine);
                     
@@ -200,15 +244,32 @@ public static class FileOps
     
     public static IEnumerable<SearchReplaceResult> SearchReplace(string filePath, string searchFor, string replaceWith, bool updateFile)
     {
-        return SearchReplace(filePath, searchFor, replaceWith, updateFile, false);
+        return SearchReplace(filePath, searchFor, replaceWith, updateFile, false, false);
     }
     
     /// Readonly implementation of SearchReplace
     public static IEnumerable<SearchReplaceResult> SearchReplace(string filePath, string searchFor, string replaceWith)
     {
-        return SearchReplace(filePath, searchFor, replaceWith, false, false);
+        return SearchReplace(filePath, searchFor, replaceWith, false, false, false);
     }
     
+    /// Searches for an expression and deletes the found rows
+    public static IEnumerable<SearchReplaceResult> SearchDelete(string filePath, string searchFor, bool updateFile, bool createBackup)
+    {
+        return SearchReplace(filePath, searchFor, String.Empty, updateFile, createBackup, true);
+    }
+    
+    /// Searches for an expression and deletes the found rows
+    public static IEnumerable<SearchReplaceResult> SearchDelete(string filePath, string searchFor, bool updateFile)
+    {
+        return SearchReplace(filePath, searchFor, String.Empty, updateFile, false, true);
+    }
+    
+    /// Readonly implementation of SearchDelete
+    public static IEnumerable<SearchReplaceResult> SearchDelete(string filePath, string searchFor)
+    {
+        return SearchReplace(filePath, searchFor, String.Empty, false, false, true);
+    }
     
     /// Only does searching in files and returns only matches
     public static IEnumerable<SearchResult> Search(string filePath, string searchFor)
@@ -271,6 +332,8 @@ public class SearchResult {
         OriginalLine = originalLine;
     }
 }
+
+public enum PosOrChunk {ByPos, ByChunk}
 
 public class SearchReplaceResult : SearchResult {
     public string   ChangedLine {get; private set;}
